@@ -307,20 +307,17 @@ def generate_images_stream(
 
     generated_count = 0
     for prompt_idx, prompt in enumerate(prompts[:total]):
-        for img_idx in range(images_per_prompt):
-            try:
-                # Use different seeds for variety when generating multiple images per prompt
-                current_seed = seed
-                if seed is None or seed < 0:
-                    # Random seed for each image
-                    current_seed = None
-                elif images_per_prompt > 1:
-                    # Offset seed for variety: base_seed + prompt_idx * 1000 + img_idx
-                    current_seed = int(seed) + prompt_idx * 1000 + img_idx
+    for img_idx in range(images_per_prompt):
+        try:
+            current_seed = seed
+            if seed is None or seed < 0:
+                current_seed = None
+            elif images_per_prompt > 1:
+                current_seed = int(seed) + prompt_idx * 1000 + img_idx
 
-                gen = None
-                if (not USE_DML) and current_seed is not None and current_seed >= 0:
-                    gen = torch.Generator(device="cuda" if DEVICE == "cuda" else "cpu").manual_seed(current_seed)
+            gen = None
+            if (not USE_DML) and current_seed is not None and current_seed >= 0:
+                gen = torch.Generator(device="cuda" if DEVICE == "cuda" else "cpu").manual_seed(current_seed)
 
             kwargs = dict(
                 prompt=prompt.strip(),
@@ -330,8 +327,8 @@ def generate_images_stream(
                 num_inference_steps=steps,
                 guidance_scale=gscale,
             )
-                if gen is not None:
-                    kwargs["generator"] = gen
+            if gen is not None:
+                kwargs["generator"] = gen
             if IP_ADAPTER_READY and len(ip_images) > 0 and isinstance(PIPE, StableDiffusionXLPipeline):
                 kwargs["ip_adapter_image"] = ip_images
                 kwargs["ip_adapter_image_embeds"] = None
@@ -341,27 +338,27 @@ def generate_images_stream(
             img = out.images[0]
 
             img_dir = tempfile.mkdtemp(prefix="gen_")
-                out_path = os.path.join(img_dir, f"prompt_{prompt_idx+1:04d}_img_{img_idx+1:02d}.png")
+            out_path = os.path.join(img_dir, f"prompt_{prompt_idx+1:04d}_img_{img_idx+1:02d}.png")
             img.save(out_path, "PNG")
             append_image_to_zip(zip_path, out_path)
 
             if first_png_path is None:
                 first_png_path = out_path
 
-                generated_count += 1
+            generated_count += 1
             gallery_images.append(img)
             if len(gallery_images) > 16:
                 gallery_images = gallery_images[-16:]
 
-                info = f"Generated {generated_count}/{total_images} | Prompt {prompt_idx+1}/{total} | Image {img_idx+1}/{images_per_prompt} | {width}x{height} | steps={steps} | scale={gscale}"
+            info = f"Generated {generated_count}/{total_images} | Prompt {prompt_idx+1}/{total} | Image {img_idx+1}/{images_per_prompt} | {width}x{height} | steps={steps} | scale={gscale}"
             yield gallery_images, first_png_path, zip_path, info
 
             del img, out
-                if DEVICE == "cuda" and (generated_count % 8 == 0):
+            if DEVICE == "cuda" and (generated_count % 8 == 0):
                 torch.cuda.empty_cache()
             gc.collect()
         except Exception as e:
-                yield gallery_images, first_png_path, zip_path, f"Error on prompt {prompt_idx+1}, image {img_idx+1}: {e}"
+            yield gallery_images, first_png_path, zip_path, f"Error on prompt {prompt_idx+1}, image {img_idx+1}: {e}"
             continue
 
     yield gallery_images, first_png_path, zip_path, f"Done. Generated {generated_count} images from {total} prompts."
