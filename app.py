@@ -163,7 +163,7 @@ def load_pipeline(model_id: str):
         return
     del_pipe()
 
-    pipe = AutoPipelineForTextToImage.from_pretrained(
+    pipe = AutoPipelineForText2Image.from_pretrained(
         model_id,
         torch_dtype=DTYPE,
         variant="fp16" if DTYPE == torch.float16 else None,
