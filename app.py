@@ -749,17 +749,17 @@ def build_ui(default_quality_mode: str = "Balanced"):
                 ):
                     yield state
         
-        btn_single.click(
+                btn_single.click(
             fn=generate_single_handler,
             outputs=[gallery_main, download_first, download_zip, status_info],
-            queue=True
+            queue=True,
         )
 
-            btn_batch.click(
+        btn_batch.click(
             fn=generate_batch_handler,
             outputs=[gallery_main, download_first, download_zip, status_info],
-                queue=True
-            )
+            queue=True,
+        )
 
         with gr.Accordion("💡 Tips & Guidelines", open=False):
             gr.Markdown("""
