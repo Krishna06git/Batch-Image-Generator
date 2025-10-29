@@ -1,0 +1,15 @@
+# requirements.txt
+transformers>=4.43.0
+diffusers>=0.30.0
+accelerate>=0.30.0
+safetensors>=0.4.2
+gradio>=4.44.0
+pillow>=10.3.0
+opencv-python-headless>=4.10.0.84
+peft>=0.12.0
+bitsandbytes>=0.43.0
+xformers>=0.0.27
+# Torch/torchvision are platform-specific; install your preferred build separately:
+# - CUDA: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# - ROCm (Linux AMD): pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm6.0
+# - Windows AMD (DirectML): pip install torch-directml

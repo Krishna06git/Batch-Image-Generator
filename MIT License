@@ -1,0 +1,9 @@
+MIT License
+
+Copyright (c) 2025 …
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+...s.txt README.md .gitignore LICENSE
+git commit -m "feat: initial batch image generator app with streaming and models"
+git remote add origin https://github.com/YOUR_GH_USERNAME/YOUR_REPO.git
+git push -u origin main
