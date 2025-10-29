@@ -13,7 +13,7 @@ from PIL import Image
 import gradio as gr
 
 from diffusers import (
-    AutoPipelineForTextToImage,
+    AutoPipelineForText2Image,
     StableDiffusionXLPipeline,
     DPMSolverMultistepScheduler,
 )
