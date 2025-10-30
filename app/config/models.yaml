@@ -1,27 +1,39 @@
 models:
-  - name: "SDXL Base"
-    path: "stabilityai/stable-diffusion-xl-base-1.0"
-    description: "Stable Diffusion XL Base 1.0 (by Stability AI)."
+  - name: "SDXL 3.5 Medium"
+    path: "stabilityai/stable-diffusion-3.5-medium"
+    description: "Stable Diffusion 3.5 Medium (by Stability AI)."
 
   - name: "SDXL Turbo"
     path: "stabilityai/sdxl-turbo"
     description: "SDXL Turbo, ultra-fast text-to-image."
 
+  - name: "SDXL Base"
+    path: "stabilityai/stable-diffusion-xl-base-1.0"
+    description: "SDXL Base, High quality images."
+
+  - name: "SDXL Lightning"
+    path: "ByteDance/SDXL-Lightning"
+    description: "SDXL Lightning, High quality images."
+
   - name: "FLUX.1 [dev]"
     path: "black-forest-labs/FLUX.1-dev"
-    description: "FLUX.1 [dev], rectified flow transformer for text-to-image generation."
+    description: "FLUX.1 [dev], rectified flow transformer for text-to-image generation." 
+    
+  - name: "Flux Midjourney"
+    path: "strangerzonehf/Flux-Midjourney-Mix2-LoRA"
+    description: "Flux Midjourney, rectified flow transformer for text-to-image generation."
 
   - name: "FLUX.1 [schnell]"
     path: "black-forest-labs/FLUX.1-schnell"
     description: "FLUX.1 [schnell], optimized for fast inference."
 
-  - name: "FLUX XL"
-    path: "flux-ai/FLUX-XL"
-    description: "FLUX XL – modern, high-quality model."
+  - name: "Qwen-Image"
+    path: "Qwen/Qwen-Image"
+    description: "Qwen-Image – realistic, high-quality model."
 
-  - name: "Playground v1"
-    path: "PlaygroundAI/playground-v1"
-    description: "Playground AI, creative image generation."
+  - name: "HunyuanImage-3.0"
+    path: "tencent/HunyuanImage-3.0"
+    description: "Hunyuan Image 3, creative image generation."
 
   - name: "RunwayML Stable Diffusion v1.5"
     path: "runwayml/stable-diffusion-v1-5"
