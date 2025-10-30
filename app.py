@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # app.py
 import os
 import gc
