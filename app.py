@@ -335,32 +335,32 @@ def generate_images_stream(
                     kwargs["ip_adapter_image_embeds"] = None
                     kwargs["ip_adapter_scale"] = ip_scales
 
-            out = PIPE(**kwargs)
-            img = out.images[0]
+                out = PIPE(**kwargs)
+                img = out.images[0]
 
-            img_dir = tempfile.mkdtemp(prefix="gen_")
+                img_dir = tempfile.mkdtemp(prefix="gen_")
                 out_path = os.path.join(img_dir, f"prompt_{prompt_idx+1:04d}_img_{img_idx+1:02d}.png")
-            img.save(out_path, "PNG")
-            append_image_to_zip(zip_path, out_path)
+                img.save(out_path, "PNG")
+                append_image_to_zip(zip_path, out_path)
 
-            if first_png_path is None:
-                first_png_path = out_path
+                if first_png_path is None:
+                    first_png_path = out_path
 
                 generated_count += 1
-            gallery_images.append(img)
-            if len(gallery_images) > 16:
-                gallery_images = gallery_images[-16:]
+                gallery_images.append(img)
+                if len(gallery_images) > 16:
+                    gallery_images = gallery_images[-16:]
 
                 info = f"Generated {generated_count}/{total_images} | Prompt {prompt_idx+1}/{total} | Image {img_idx+1}/{images_per_prompt} | {width}x{height} | steps={steps} | scale={gscale}"
-            yield gallery_images, first_png_path, zip_path, info
+                yield gallery_images, first_png_path, zip_path, info
 
-            del img, out
+                del img, out
                 if DEVICE == "cuda" and (generated_count % 8 == 0):
-                torch.cuda.empty_cache()
-            gc.collect()
-        except Exception as e:
+                    torch.cuda.empty_cache()
+                gc.collect()
+            except Exception as e:
                 yield gallery_images, first_png_path, zip_path, f"Error on prompt {prompt_idx+1}, image {img_idx+1}: {e}"
-            continue
+                continue
 
     yield gallery_images, first_png_path, zip_path, f"Done. Generated {generated_count} images from {total} prompts."
     return
