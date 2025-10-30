@@ -757,7 +757,7 @@ def build_ui(default_quality_mode: str = "Balanced"):
             queue=True,
         )
 
-            btn_batch.click(
+        btn_batch.click(
             fn=generate_batch_handler,
             inputs=[
                 model_dropdown, prompt_file_upload, negative_textbox, style_dropdown, res_dropdown, ratio_dropdown,
