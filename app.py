@@ -320,14 +320,14 @@ def generate_images_stream(
                 if (not USE_DML) and current_seed is not None and current_seed >= 0:
                     gen = torch.Generator(device="cuda" if DEVICE == "cuda" else "cpu").manual_seed(current_seed)
 
-            kwargs = dict(
-                prompt=prompt.strip(),
-                negative_prompt=neg_prompt,
-                width=width,
-                height=height,
-                num_inference_steps=steps,
-                guidance_scale=gscale,
-            )
+                kwargs = dict(
+                    prompt=prompt.strip(),
+                    negative_prompt=neg_prompt,
+                    width=width,
+                    height=height,
+                    num_inference_steps=steps,
+                    guidance_scale=gscale,
+                )
                 if gen is not None:
                     kwargs["generator"] = gen
             if IP_ADAPTER_READY and len(ip_images) > 0 and isinstance(PIPE, StableDiffusionXLPipeline):
