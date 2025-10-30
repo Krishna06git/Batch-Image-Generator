@@ -11,6 +11,7 @@ from typing import List, Tuple, Optional, Dict, Any
 import torch
 from PIL import Image
 import gradio as gr
+import yaml
 
 from diffusers import (
     AutoPipelineForText2Image,
@@ -43,31 +44,28 @@ try:
 except Exception:
     pass
 
-MODEL_OPTIONS = [
-    # Fast / Turbo
-    "black-forest-labs/FLUX.1-schnell",
-    "stabilityai/sdxl-turbo",
-    "Lykon/DreamShaper-XL-Turbo-v2.0",
+def load_models_yaml(yaml_path: str = "models.yaml"):
+    paths_to_try = [yaml_path, os.path.join("app", "config", "models.yaml")]
+    for path in paths_to_try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            # Support both dict or list style yaml
+            models = data.get("models") if isinstance(data, dict) else data
+            result = []
+            for model in models:
+                if isinstance(model, dict) and "name" in model and "path" in model:
+                    result.append({"name": model["name"], "path": model["path"], "description": model.get("description", "")})
+            return result
+    return []
 
-    # Quality SDXL / FLUX
-    "black-forest-labs/FLUX.1-dev",
-    "stabilityai/stable-diffusion-xl-base-1.0",
-    "RunDiffusion/Juggernaut-XL-v10",
-    "RunDiffusion/Juggernaut-XL-v9",
-    "RunDiffusion/Juggernaut-XL-v8",
-    "SG161222/RealVisXL_V6.0_B1",
+MODEL_YAML_ENTRIES = load_models_yaml()
+if not MODEL_YAML_ENTRIES:
+    raise RuntimeError("No models found in models.yaml! Please add models with HuggingFace paths.")
 
-    # Playground
-    "playgroundai/playground-v2-1024px-aesthetic",
-    "playgroundai/playground-v2-1024px-base",
-
-    # SD1.5 / Legacy
-    "runwayml/stable-diffusion-v1-5",
-    "runwayml/sd-v1-5",
-    "SG161222/Realistic_Vision_V4.0",
-    "stablediffusionapi/realisticstockphoto-v20",
-]
-DEFAULT_MODEL_ID = "black-forest-labs/FLUX.1-schnell"
+MODEL_OPTIONS = [x["name"] for x in MODEL_YAML_ENTRIES]
+MODEL_NAME2PATH = {x["name"]: x["path"] for x in MODEL_YAML_ENTRIES}
+DEFAULT_MODEL_ID = MODEL_NAME2PATH.get(MODEL_OPTIONS[0])
 
 STYLE_PRESETS = {
     "none": "",
@@ -221,11 +219,13 @@ def default_steps_and_scale(model_id: str, quality_mode: str) -> Tuple[int, floa
         return (28 if quality_mode == "High" else 20 if quality_mode == "Balanced" else 14), (7.5 if quality_mode == "High" else 6.5 if quality_mode == "Balanced" else 5.5)
     if any(k in mid for k in ["realvis", "juggernaut", "stable-diffusion-xl", "playground"]):
         return (35 if quality_mode == "High" else 25 if quality_mode == "Balanced" else 18), (7.5 if quality_mode == "High" else 7.0 if quality_mode == "Balanced" else 6.5)
+    # SD1.5 family: runwayml sd-v1-5, realistic vision v4, realistic stock photo v2.0
     if any(k in mid for k in ["sd-v1-5", "stable-diffusion-v1-5", "realistic_vision_v4", "realistic-vision", "realisticstockphoto", "realisticstockphoto-v20"]):
         return (30 if quality_mode == "High" else 25 if quality_mode == "Balanced" else 18), (7.0 if quality_mode != "Fast" else 6.0)
     return (25 if quality_mode != "Fast" else 12), (7.0 if quality_mode != "Fast" else 5.0)
 
 def get_model_info(model_id: str) -> str:
+    """Returns helpful info about model's recommended settings"""
     mid = model_id.lower()
     if "schnell" in mid or "turbo" in mid:
         return "⚡ Fast model: 4-8 steps, guidance ~2.0. Best for quick drafts and iterations."
@@ -292,7 +292,7 @@ def generate_images_stream(
     first_png_path = None
     zip_path = create_zip_container()
     total = len(prompts) if not max_images else min(len(prompts), max_images)
-    images_per_prompt = max(1, min(10, int(images_per_prompt)))
+    images_per_prompt = max(1, min(10, int(images_per_prompt)))  # Clamp 1-10
     total_images = total * images_per_prompt
 
     ip_images, ip_scales = [], []
@@ -307,57 +307,60 @@ def generate_images_stream(
     for prompt_idx, prompt in enumerate(prompts[:total]):
         for img_idx in range(images_per_prompt):
             try:
+                # Use different seeds for variety when generating multiple images per prompt
                 current_seed = seed
                 if seed is None or seed < 0:
+                    # Random seed for each image
                     current_seed = None
                 elif images_per_prompt > 1:
+                    # Offset seed for variety: base_seed + prompt_idx * 1000 + img_idx
                     current_seed = int(seed) + prompt_idx * 1000 + img_idx
 
                 gen = None
                 if (not USE_DML) and current_seed is not None and current_seed >= 0:
                     gen = torch.Generator(device="cuda" if DEVICE == "cuda" else "cpu").manual_seed(current_seed)
 
-                kwargs = dict(
-                    prompt=prompt.strip(),
-                    negative_prompt=neg_prompt,
-                    width=width,
-                    height=height,
-                    num_inference_steps=steps,
-                    guidance_scale=gscale,
-                )
+            kwargs = dict(
+                prompt=prompt.strip(),
+                negative_prompt=neg_prompt,
+                width=width,
+                height=height,
+                num_inference_steps=steps,
+                guidance_scale=gscale,
+            )
                 if gen is not None:
                     kwargs["generator"] = gen
-                if IP_ADAPTER_READY and len(ip_images) > 0 and isinstance(PIPE, StableDiffusionXLPipeline):
-                    kwargs["ip_adapter_image"] = ip_images
-                    kwargs["ip_adapter_image_embeds"] = None
-                    kwargs["ip_adapter_scale"] = ip_scales
+            if IP_ADAPTER_READY and len(ip_images) > 0 and isinstance(PIPE, StableDiffusionXLPipeline):
+                kwargs["ip_adapter_image"] = ip_images
+                kwargs["ip_adapter_image_embeds"] = None
+                kwargs["ip_adapter_scale"] = ip_scales
 
-                out = PIPE(**kwargs)
-                img = out.images[0]
+            out = PIPE(**kwargs)
+            img = out.images[0]
 
-                img_dir = tempfile.mkdtemp(prefix="gen_")
+            img_dir = tempfile.mkdtemp(prefix="gen_")
                 out_path = os.path.join(img_dir, f"prompt_{prompt_idx+1:04d}_img_{img_idx+1:02d}.png")
-                img.save(out_path, "PNG")
-                append_image_to_zip(zip_path, out_path)
+            img.save(out_path, "PNG")
+            append_image_to_zip(zip_path, out_path)
 
-                if first_png_path is None:
-                    first_png_path = out_path
+            if first_png_path is None:
+                first_png_path = out_path
 
                 generated_count += 1
-                gallery_images.append(img)
-                if len(gallery_images) > 16:
-                    gallery_images = gallery_images[-16:]
+            gallery_images.append(img)
+            if len(gallery_images) > 16:
+                gallery_images = gallery_images[-16:]
 
                 info = f"Generated {generated_count}/{total_images} | Prompt {prompt_idx+1}/{total} | Image {img_idx+1}/{images_per_prompt} | {width}x{height} | steps={steps} | scale={gscale}"
-                yield gallery_images, first_png_path, zip_path, info
+            yield gallery_images, first_png_path, zip_path, info
 
-                del img, out
+            del img, out
                 if DEVICE == "cuda" and (generated_count % 8 == 0):
-                    torch.cuda.empty_cache()
-                gc.collect()
-            except Exception as e:
+                torch.cuda.empty_cache()
+            gc.collect()
+        except Exception as e:
                 yield gallery_images, first_png_path, zip_path, f"Error on prompt {prompt_idx+1}, image {img_idx+1}: {e}"
-                continue
+            continue
 
     yield gallery_images, first_png_path, zip_path, f"Done. Generated {generated_count} images from {total} prompts."
     return
@@ -448,6 +451,27 @@ def build_ui(default_quality_mode: str = "Balanced"):
     with gr.Blocks(title="Batch Image Generator - YouTube Visuals", theme=gr.themes.Soft(), css=custom_css) as demo:
         gr.Markdown("# 🎨 Batch Image Generator for YouTube Visuals")
         gr.Markdown("Generate high-quality images with character consistency, streaming batches, and performance modes.")
+
+        # Shared state variables (hidden)
+        model_id = gr.State(value=DEFAULT_MODEL_ID)
+        style_preset = gr.State(value="none")
+        quality_mode = gr.State(value=default_quality_mode)
+        target_res = gr.State(value="1080p")
+        ratio = gr.State(value="16:9")
+        images_per_prompt = gr.State(value=1)
+        num_steps = gr.State(value=0)
+        guidance_scale = gr.State(value=0.0)
+        seed = gr.State(value=-1)
+        prompt_text = gr.State(value="")
+        prompt_file_state = gr.State(value=None)
+        negative_prompt = gr.State(value="deformed, irregular eyes, ugly, bad anatomy, extra limbs, watermark, text, logo, blurry, low quality")
+        char1_name = gr.State(value="")
+        char1_img = gr.State(value=None)
+        char1_strength = gr.State(value=0.8)
+        char2_name = gr.State(value="")
+        char2_img = gr.State(value=None)
+        char2_strength = gr.State(value=0.8)
+        limit_images = gr.State(value=0)
         
         # Large Preview Window (always visible)
         with gr.Row():
@@ -462,10 +486,13 @@ def build_ui(default_quality_mode: str = "Balanced"):
                 status_info = gr.Markdown("Ready to generate. Configure settings in tabs below and click Generate.", elem_classes=["status-info"])
             
             with gr.Column(scale=1):
+                # Action buttons
                 gr.Markdown("### 🚀 Generate")
                 btn_single = gr.Button("✨ Generate from Prompt", variant="primary", size="lg")
                 btn_batch = gr.Button("📝 Generate Batch from File", variant="secondary", size="lg")
                 gr.Markdown("---")
+                
+                # Quick settings summary
                 gr.Markdown("### ⚙️ Current Settings")
                 settings_summary = gr.Markdown("**Model:** Loading...\n**Style:** none\n**Resolution:** 1080p\n**Ratio:** 16:9")
         
@@ -475,21 +502,31 @@ def build_ui(default_quality_mode: str = "Balanced"):
                 with gr.Column():
                     model_dropdown = gr.Dropdown(
                         choices=MODEL_OPTIONS,
-                        value=DEFAULT_MODEL_ID,
+                        value=MODEL_OPTIONS[0],
                         label="Select AI Model",
                         info="Choose your text-to-image generation model"
                     )
+                    model_info = gr.Markdown(get_model_info(DEFAULT_MODEL_ID), elem_classes=["model-info-box"])
                     quality_dropdown = gr.Dropdown(
                         choices=["Fast", "Balanced", "High"],
                         value=default_quality_mode,
                         label="Quality/Speed Mode",
                         info="Fast = quick drafts, Balanced = general use, High = final quality"
                     )
-                    model_info = gr.Markdown(get_model_info(DEFAULT_MODEL_ID), elem_classes=["model-info-box"])
+                    
                     def update_model_state(m, qm):
-                        return get_model_info(m)
-                    model_dropdown.change(fn=lambda m: update_model_state(m, quality_dropdown.value), inputs=model_dropdown, outputs=model_info)
-
+                        return m, qm, get_model_info(MODEL_NAME2PATH.get(m, DEFAULT_MODEL_ID))
+                    model_dropdown.change(
+                        fn=update_model_state,
+                        inputs=[model_dropdown, quality_dropdown],
+                        outputs=[model_id, quality_mode, model_info]
+                    )
+                    quality_dropdown.change(
+                        fn=update_model_state,
+                        inputs=[model_dropdown, quality_dropdown],
+                        outputs=[model_id, quality_mode, model_info]
+                    )
+            
             with gr.Tab("🎨 Style"):
                 style_dropdown = gr.Dropdown(
                     choices=list(STYLE_PRESETS.keys()),
@@ -498,10 +535,12 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     info="Apply artistic style enhancements to your prompts"
                 )
                 style_description = gr.Markdown("**Style:** none - No style preset applied")
+                
                 def update_style(s):
                     desc = STYLE_PRESETS.get(s, "")
-                    return f"**Style:** {s}\n\n{desc if desc else 'No style preset applied'}"
-                style_dropdown.change(fn=update_style, inputs=style_dropdown, outputs=style_description)
+                    return s, f"**Style:** {s}\n\n{desc if desc else 'No style preset applied'}"
+                style_dropdown.change(fn=lambda s: update_style(s)[0], inputs=style_dropdown, outputs=style_preset)
+                style_dropdown.change(fn=lambda s: update_style(s)[1], inputs=style_dropdown, outputs=style_description)
             
             with gr.Tab("📐 Resolution"):
                 res_dropdown = gr.Dropdown(
@@ -511,9 +550,11 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     info="Target resolution for the longest side of the image"
                 )
                 res_preview = gr.Markdown("**Selected:** 1080p (long side)")
+                
                 def update_res(r):
-                    return f"**Selected:** {r} (long side = {RES_OPTIONS[r]}px)"
-                res_dropdown.change(fn=update_res, inputs=res_dropdown, outputs=res_preview)
+                    return r, f"**Selected:** {r} (long side = {RES_OPTIONS[r]}px)"
+                res_dropdown.change(fn=lambda r: update_res(r)[0], inputs=res_dropdown, outputs=target_res)
+                res_dropdown.change(fn=lambda r: update_res(r)[1], inputs=res_dropdown, outputs=res_preview)
             
             with gr.Tab("⚖️ Ratio"):
                 ratio_dropdown = gr.Dropdown(
@@ -524,12 +565,27 @@ def build_ui(default_quality_mode: str = "Balanced"):
                 )
                 w, h = compute_size(1080, "16:9")
                 ratio_preview = gr.Markdown(f"**Selected:** 16:9 → Final size: {w}x{h}px (at 1080p long side)")
+                
                 def update_ratio(r, current_res_val):
                     current_res = current_res_val if current_res_val else "1080p"
                     w, h = compute_size(RES_OPTIONS[current_res], r)
-                    return f"**Selected:** {r} → Final size: {w}x{h}px (at {current_res} long side)"
-                ratio_dropdown.change(fn=lambda r: update_ratio(r, res_dropdown.value), inputs=ratio_dropdown, outputs=ratio_preview)
-                res_dropdown.change(fn=lambda rv: update_ratio(ratio_dropdown.value, rv), inputs=res_dropdown, outputs=ratio_preview)
+                    return r, f"**Selected:** {r} → Final size: {w}x{h}px (at {current_res} long side)"
+                ratio_dropdown.change(
+                    fn=lambda r: update_ratio(r, target_res.value)[0],
+                    inputs=[ratio_dropdown],
+                    outputs=ratio
+                )
+                ratio_dropdown.change(
+                    fn=lambda r: update_ratio(r, target_res.value)[1],
+                    inputs=[ratio_dropdown],
+                    outputs=ratio_preview
+                )
+                # Also update when resolution changes
+                res_dropdown.change(
+                    fn=lambda res: update_ratio(ratio.value, res)[1],
+                    inputs=[res_dropdown],
+                    outputs=ratio_preview
+                )
             
             with gr.Tab("🖼️ Images Per Prompt"):
                 images_slider = gr.Slider(
@@ -538,7 +594,11 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     info="Generate multiple variations from each prompt (1-10)"
                 )
                 images_info = gr.Markdown("**Current:** 1 image per prompt")
-                images_slider.change(fn=lambda n: f"**Current:** {int(n)} image(s) per prompt", inputs=images_slider, outputs=images_info)
+                
+                def update_images(n):
+                    return int(n), f"**Current:** {int(n)} image(s) per prompt"
+                images_slider.change(fn=lambda n: update_images(n)[0], inputs=images_slider, outputs=images_per_prompt)
+                images_slider.change(fn=lambda n: update_images(n)[1], inputs=images_slider, outputs=images_info)
             
             with gr.Tab("🔄 Inference Steps"):
                 steps_slider = gr.Slider(
@@ -547,11 +607,13 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     info="0 = auto (recommended). Higher = better quality but slower"
                 )
                 steps_info = gr.Markdown("**Current:** Auto (model will choose optimal steps)")
+                
                 def update_steps(s):
                     if s == 0:
-                        return "**Current:** Auto (model will choose optimal steps based on selected model and quality mode)"
-                    return f"**Current:** {int(s)} steps"
-                steps_slider.change(fn=update_steps, inputs=steps_slider, outputs=steps_info)
+                        return 0, "**Current:** Auto (model will choose optimal steps based on selected model and quality mode)"
+                    return int(s), f"**Current:** {int(s)} steps"
+                steps_slider.change(fn=lambda s: update_steps(s)[0], inputs=steps_slider, outputs=num_steps)
+                steps_slider.change(fn=lambda s: update_steps(s)[1], inputs=steps_slider, outputs=steps_info)
             
             with gr.Tab("🎯 Guidance Scale"):
                 guidance_slider = gr.Slider(
@@ -560,11 +622,13 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     info="0 = auto (recommended). How closely to follow the prompt"
                 )
                 guidance_info = gr.Markdown("**Current:** Auto (model will choose optimal guidance)")
+                
                 def update_guidance(g):
                     if g == 0:
-                        return "**Current:** Auto (model will choose optimal guidance based on selected model and quality mode)"
-                    return f"**Current:** {float(g)}"
-                guidance_slider.change(fn=update_guidance, inputs=guidance_slider, outputs=guidance_info)
+                        return 0.0, "**Current:** Auto (model will choose optimal guidance based on selected model and quality mode)"
+                    return float(g), f"**Current:** {float(g)}"
+                guidance_slider.change(fn=lambda g: update_guidance(g)[0], inputs=guidance_slider, outputs=guidance_scale)
+                guidance_slider.change(fn=lambda g: update_guidance(g)[1], inputs=guidance_slider, outputs=guidance_info)
             
             with gr.Tab("🌱 Seed"):
                 seed_input = gr.Number(
@@ -573,11 +637,13 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     info="-1 or leave blank = random seed. Positive number = reproducible results"
                 )
                 seed_info = gr.Markdown("**Current:** Random (each generation will be unique)")
+                
                 def update_seed(s):
                     if s is None or s < 0:
-                        return "**Current:** Random (each generation will be unique)"
-                    return f"**Current:** {int(s)} (reproducible)"
-                seed_input.change(fn=update_seed, inputs=seed_input, outputs=seed_info)
+                        return -1, "**Current:** Random (each generation will be unique)"
+                    return int(s), f"**Current:** {int(s)} (reproducible)"
+                seed_input.change(fn=lambda s: update_seed(s)[0], inputs=seed_input, outputs=seed)
+                seed_input.change(fn=lambda s: update_seed(s)[1], inputs=seed_input, outputs=seed_info)
             
             with gr.Tab("📝 Prompts"):
                 with gr.Column():
@@ -594,6 +660,11 @@ def build_ui(default_quality_mode: str = "Balanced"):
                         label="Upload Prompt File (.txt)",
                         file_types=[".txt"]
                     )
+                    
+                    def update_prompts(txt, f):
+                        return txt if txt else None, f
+                    prompt_textbox.change(fn=lambda t: update_prompts(t, None)[0], inputs=prompt_textbox, outputs=prompt_text)
+                    prompt_file_upload.change(fn=lambda f: update_prompts("", f)[1], inputs=prompt_file_upload, outputs=prompt_file_state)
             
             with gr.Tab("👥 Character Consistency"):
                 char_enable = gr.Checkbox(
@@ -601,15 +672,32 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     label="Enable Character Consistency",
                     info="Use IP-Adapter XL to maintain character appearance across images"
                 )
+                
                 with gr.Row(visible=False) as char_row1:
                     char1_name_input = gr.Textbox(label="Character 1 Name", placeholder="e.g., Aria (use this name in your prompts)")
                     char1_img_input = gr.Image(type="pil", label="Character 1 Reference Image", height=200)
                     char1_strength_input = gr.Slider(0.0, 1.0, value=0.8, step=0.05, label="Identity Strength")
+                
                 with gr.Row(visible=False) as char_row2:
                     char2_name_input = gr.Textbox(label="Character 2 Name", placeholder="e.g., Kian (use this name in your prompts)")
                     char2_img_input = gr.Image(type="pil", label="Character 2 Reference Image", height=200)
                     char2_strength_input = gr.Slider(0.0, 1.0, value=0.8, step=0.05, label="Identity Strength")
-                char_enable.change(fn=lambda enabled: (gr.update(visible=enabled), gr.update(visible=enabled)), inputs=char_enable, outputs=[char_row1, char_row2])
+                
+                def toggle_chars(enabled):
+                    return gr.update(visible=enabled), gr.update(visible=enabled)
+                char_enable.change(fn=toggle_chars, inputs=char_enable, outputs=[char_row1, char_row2])
+                
+                def update_char1(name, img, strength):
+                    return name or "", img, float(strength) if strength else 0.8
+                char1_name_input.change(fn=update_char1, inputs=[char1_name_input, char1_img_input, char1_strength_input], outputs=[char1_name, char1_img, char1_strength])
+                char1_img_input.change(fn=update_char1, inputs=[char1_name_input, char1_img_input, char1_strength_input], outputs=[char1_name, char1_img, char1_strength])
+                char1_strength_input.change(fn=update_char1, inputs=[char1_name_input, char1_img_input, char1_strength_input], outputs=[char1_name, char1_img, char1_strength])
+                
+                def update_char2(name, img, strength):
+                    return name or "", img, float(strength) if strength else 0.8
+                char2_name_input.change(fn=update_char2, inputs=[char2_name_input, char2_img_input, char2_strength_input], outputs=[char2_name, char2_img, char2_strength])
+                char2_img_input.change(fn=update_char2, inputs=[char2_name_input, char2_img_input, char2_strength_input], outputs=[char2_name, char2_img, char2_strength])
+                char2_strength_input.change(fn=update_char2, inputs=[char2_name_input, char2_img_input, char2_strength_input], outputs=[char2_name, char2_img, char2_strength])
             
             with gr.Tab("❌ Negative Prompts"):
                 negative_textbox = gr.Textbox(
@@ -618,6 +706,7 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     value="deformed, irregular eyes, ugly, bad anatomy, extra limbs, watermark, text, logo, blurry, low quality",
                     info="Things to avoid in generated images"
                 )
+                negative_textbox.change(fn=lambda n: n, inputs=negative_textbox, outputs=negative_prompt)
             
             with gr.Tab("📥 Downloads"):
                 gr.Markdown("### Generated Images")
@@ -633,7 +722,7 @@ def build_ui(default_quality_mode: str = "Balanced"):
             if not prompt_text_in or not str(prompt_text_in).strip():
                 return None, None, None, "⚠️ Please enter a prompt."
             result = ui_generate_single(
-                model_sel, str(prompt_text_in), neg_prompt_in or "", style_sel, res_sel, ratio_sel,
+                MODEL_NAME2PATH.get(model_sel, DEFAULT_MODEL_ID), str(prompt_text_in), neg_prompt_in or "", style_sel, res_sel, ratio_sel,
                 quality_sel, steps_in, guidance_in, seed_in, images_per_prompt_in,
                 c1_name, c1_img, c1_strength, c2_name, c2_img, c2_strength
             )
@@ -648,14 +737,14 @@ def build_ui(default_quality_mode: str = "Balanced"):
             if prompt_file_in is None:
                 yield None, None, None, "⚠️ Please upload a prompt file (.txt)."
                 return
-            for state in ui_generate_batch_stream(
-                model_sel, prompt_file_in, neg_prompt_in or "", style_sel, res_sel, ratio_sel,
+                for state in ui_generate_batch_stream(
+                MODEL_NAME2PATH.get(model_sel, DEFAULT_MODEL_ID), prompt_file_in, neg_prompt_in or "", style_sel, res_sel, ratio_sel,
                 quality_sel, steps_in, guidance_in, seed_in, images_per_prompt_in,
                 c1_name, c1_img, c1_strength, c2_name, c2_img, c2_strength,
                 0,
-            ):
-                yield state
-
+                ):
+                    yield state
+        
         btn_single.click(
             fn=generate_single_handler,
             inputs=[
@@ -668,7 +757,7 @@ def build_ui(default_quality_mode: str = "Balanced"):
             queue=True,
         )
 
-        btn_batch.click(
+            btn_batch.click(
             fn=generate_batch_handler,
             inputs=[
                 model_dropdown, prompt_file_upload, negative_textbox, style_dropdown, res_dropdown, ratio_dropdown,
@@ -678,7 +767,7 @@ def build_ui(default_quality_mode: str = "Balanced"):
             ],
             outputs=[gallery_main, download_first, download_zip, status_info],
             queue=True,
-        )
+            )
 
         with gr.Accordion("💡 Tips & Guidelines", open=False):
             gr.Markdown("""
