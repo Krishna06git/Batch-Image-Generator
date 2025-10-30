@@ -11,6 +11,7 @@ from typing import List, Tuple, Optional, Dict, Any
 import torch
 from PIL import Image
 import gradio as gr
+import yaml
 
 from diffusers import (
     AutoPipelineForText2Image,
@@ -43,31 +44,28 @@ try:
 except Exception:
     pass
 
-MODEL_OPTIONS = [
-    # Fast / Turbo
-    "black-forest-labs/FLUX.1-schnell",
-    "stabilityai/sdxl-turbo",
-    "Lykon/DreamShaper-XL-Turbo-v2.0",
+def load_models_yaml(yaml_path: str = "models.yaml"):
+    paths_to_try = [yaml_path, os.path.join("app", "config", "models.yaml")]
+    for path in paths_to_try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            # Support both dict or list style yaml
+            models = data.get("models") if isinstance(data, dict) else data
+            result = []
+            for model in models:
+                if isinstance(model, dict) and "name" in model and "path" in model:
+                    result.append({"name": model["name"], "path": model["path"], "description": model.get("description", "")})
+            return result
+    return []
 
-    # Quality SDXL / FLUX
-    "black-forest-labs/FLUX.1-dev",
-    "stabilityai/stable-diffusion-xl-base-1.0",
-    "RunDiffusion/Juggernaut-XL-v10",
-    "RunDiffusion/Juggernaut-XL-v9",
-    "RunDiffusion/Juggernaut-XL-v8",
-    "SG161222/RealVisXL_V6.0_B1",
+MODEL_YAML_ENTRIES = load_models_yaml()
+if not MODEL_YAML_ENTRIES:
+    raise RuntimeError("No models found in models.yaml! Please add models with HuggingFace paths.")
 
-    # Playground variants
-    "playgroundai/playground-v2-1024px-aesthetic",
-    "playgroundai/playground-v2-1024px-base",
-
-    # SD1.5 / Legacy popular
-    "runwayml/stable-diffusion-v1-5",
-    "runwayml/sd-v1-5",
-    "SG161222/Realistic_Vision_V4.0",
-    "stablediffusionapi/realisticstockphoto-v20",
-]
-DEFAULT_MODEL_ID = "black-forest-labs/FLUX.1-schnell"
+MODEL_OPTIONS = [x["name"] for x in MODEL_YAML_ENTRIES]
+MODEL_NAME2PATH = {x["name"]: x["path"] for x in MODEL_YAML_ENTRIES}
+DEFAULT_MODEL_ID = MODEL_NAME2PATH.get(MODEL_OPTIONS[0])
 
 STYLE_PRESETS = {
     "none": "",
@@ -504,7 +502,7 @@ def build_ui(default_quality_mode: str = "Balanced"):
                 with gr.Column():
                     model_dropdown = gr.Dropdown(
                         choices=MODEL_OPTIONS,
-                        value=DEFAULT_MODEL_ID,
+                        value=MODEL_OPTIONS[0],
                         label="Select AI Model",
                         info="Choose your text-to-image generation model"
                     )
@@ -517,7 +515,7 @@ def build_ui(default_quality_mode: str = "Balanced"):
                     )
                     
                     def update_model_state(m, qm):
-                        return m, qm, get_model_info(m)
+                        return m, qm, get_model_info(MODEL_NAME2PATH.get(m, DEFAULT_MODEL_ID))
                     model_dropdown.change(
                         fn=update_model_state,
                         inputs=[model_dropdown, quality_dropdown],
@@ -717,51 +715,58 @@ def build_ui(default_quality_mode: str = "Balanced"):
                 gr.Markdown("---")
                 gr.Markdown("**Note:** Downloads update automatically as images are generated. ZIP file grows incrementally for batch operations.")
         
-        # Generation handlers  
-        def generate_single_handler():
-            current_prompt = prompt_text.value
-            if not current_prompt:
-                return None, None, None, "⚠️ Please enter a prompt in the Prompts tab."
-            
+        # Generation handlers using direct inputs
+        def generate_single_handler(model_sel, prompt_text_in, neg_prompt_in, style_sel, res_sel, ratio_sel,
+                                    quality_sel, steps_in, guidance_in, seed_in, images_per_prompt_in,
+                                    c1_name, c1_img, c1_strength, c2_name, c2_img, c2_strength):
+            if not prompt_text_in or not str(prompt_text_in).strip():
+                return None, None, None, "⚠️ Please enter a prompt."
             result = ui_generate_single(
-                model_id.value, current_prompt, negative_prompt.value, style_preset.value,
-                target_res.value, ratio.value, quality_mode.value, num_steps.value,
-                guidance_scale.value, seed.value, images_per_prompt.value,
-                char1_name.value, char1_img.value, char1_strength.value,
-                char2_name.value, char2_img.value, char2_strength.value
+                MODEL_NAME2PATH.get(model_sel, DEFAULT_MODEL_ID), str(prompt_text_in), neg_prompt_in or "", style_sel, res_sel, ratio_sel,
+                quality_sel, steps_in, guidance_in, seed_in, images_per_prompt_in,
+                c1_name, c1_img, c1_strength, c2_name, c2_img, c2_strength
             )
             if result:
                 imgs, first_file, zip_file, info = result
                 return imgs, first_file, zip_file, info or "✅ Generation complete!"
             return None, None, None, "❌ Generation failed. Check settings and try again."
-        
-        def generate_batch_handler():
-            current_file = prompt_file_state.value
-            if not current_file:
-                yield None, None, None, "⚠️ Please upload a prompt file in the Prompts tab."
+
+        def generate_batch_handler(model_sel, prompt_file_in, neg_prompt_in, style_sel, res_sel, ratio_sel,
+                                   quality_sel, steps_in, guidance_in, seed_in, images_per_prompt_in,
+                                   c1_name, c1_img, c1_strength, c2_name, c2_img, c2_strength):
+            if prompt_file_in is None:
+                yield None, None, None, "⚠️ Please upload a prompt file (.txt)."
                 return
-            
-            # Yield states directly for streaming
                 for state in ui_generate_batch_stream(
-                model_id.value, current_file, negative_prompt.value, style_preset.value,
-                target_res.value, ratio.value, quality_mode.value, num_steps.value,
-                guidance_scale.value, seed.value, images_per_prompt.value,
-                char1_name.value, char1_img.value, char1_strength.value,
-                char2_name.value, char2_img.value, char2_strength.value,
-                limit_images.value
+                MODEL_NAME2PATH.get(model_sel, DEFAULT_MODEL_ID), prompt_file_in, neg_prompt_in or "", style_sel, res_sel, ratio_sel,
+                quality_sel, steps_in, guidance_in, seed_in, images_per_prompt_in,
+                c1_name, c1_img, c1_strength, c2_name, c2_img, c2_strength,
+                0,
                 ):
                     yield state
         
         btn_single.click(
             fn=generate_single_handler,
+            inputs=[
+                model_dropdown, prompt_textbox, negative_textbox, style_dropdown, res_dropdown, ratio_dropdown,
+                quality_dropdown, steps_slider, guidance_slider, seed_input, images_slider,
+                char1_name_input, char1_img_input, char1_strength_input,
+                char2_name_input, char2_img_input, char2_strength_input,
+            ],
             outputs=[gallery_main, download_first, download_zip, status_info],
-            queue=True
+            queue=True,
         )
 
             btn_batch.click(
             fn=generate_batch_handler,
+            inputs=[
+                model_dropdown, prompt_file_upload, negative_textbox, style_dropdown, res_dropdown, ratio_dropdown,
+                quality_dropdown, steps_slider, guidance_slider, seed_input, images_slider,
+                char1_name_input, char1_img_input, char1_strength_input,
+                char2_name_input, char2_img_input, char2_strength_input,
+            ],
             outputs=[gallery_main, download_first, download_zip, status_info],
-                queue=True
+            queue=True,
             )
 
         with gr.Accordion("💡 Tips & Guidelines", open=False):
