@@ -330,10 +330,10 @@ def generate_images_stream(
                 )
                 if gen is not None:
                     kwargs["generator"] = gen
-            if IP_ADAPTER_READY and len(ip_images) > 0 and isinstance(PIPE, StableDiffusionXLPipeline):
-                kwargs["ip_adapter_image"] = ip_images
-                kwargs["ip_adapter_image_embeds"] = None
-                kwargs["ip_adapter_scale"] = ip_scales
+                if IP_ADAPTER_READY and len(ip_images) > 0 and isinstance(PIPE, StableDiffusionXLPipeline):
+                    kwargs["ip_adapter_image"] = ip_images
+                    kwargs["ip_adapter_image_embeds"] = None
+                    kwargs["ip_adapter_scale"] = ip_scales
 
             out = PIPE(**kwargs)
             img = out.images[0]
